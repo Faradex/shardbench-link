@@ -181,6 +181,9 @@ typedef struct {
 /** One request, and the buffer its answer goes in. */
 typedef struct {
     uint8_t        type;        /**< SBL_GET, SBL_SET or SBL_CALL */
+    /** The host is holding this open. A handler that returns SBL_DEFER must keep it,
+        because that is what sbl_resolve() matches the answer to. */
+    uint8_t        seq;
     uint16_t       id;
     const uint8_t *payload;     /**< what arrived; NULL when len is 0 */
     uint16_t       len;

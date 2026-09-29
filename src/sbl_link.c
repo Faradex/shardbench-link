@@ -309,6 +309,7 @@ static void dispatch(const sbl_frame *f, void *user)
         }
 
         req.type = f->type;
+        req.seq = f->seq;
         req.id = f->id;
         req.payload = f->payload;
         req.len = f->len;
