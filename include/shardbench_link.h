@@ -146,6 +146,120 @@ typedef struct {
 void sbl_decoder_init(sbl_decoder *d, sbl_frame_fn on_frame, void *user);
 void sbl_decoder_feed(sbl_decoder *d, const uint8_t *data, size_t len);
 
+/* --- the link -------------------------------------------------------------- */
+
+/**
+ * What the library needs from the platform, and all it needs.
+ *
+ * `write` must put every byte it is given on the wire. `lock`/`unlock` are held around
+ * a whole frame, because a frame interleaved with another is lost to both. `tick_ms` is
+ * a free-running millisecond counter; only differences matter, so it may wrap.
+ */
+typedef struct {
+    void     (*write)(void *io, const uint8_t *data, size_t len);
+    void     (*lock)(void *io);
+    void     (*unlock)(void *io);
+    uint32_t (*tick_ms)(void *io);
+    void      *io;
+} sbl_port;
+
+/** What INFO tells the host. Pointed to by the context; must outlive it. */
+typedef struct {
+    uint16_t    type_id;
+    uint32_t    def_hash;
+    uint8_t     uid[12];
+    uint8_t     fw_version[4];
+    const char *sdk_version;
+    uint8_t     app_slot;
+} sbl_device_info;
+
+/** Which message types a resource answers. */
+#define SBL_CAN_GET  0x01
+#define SBL_CAN_SET  0x02
+#define SBL_CAN_CALL 0x04
+
+/** One request, and the buffer its answer goes in. */
+typedef struct {
+    uint8_t        type;        /**< SBL_GET, SBL_SET or SBL_CALL */
+    uint16_t       id;
+    const uint8_t *payload;     /**< what arrived; NULL when len is 0 */
+    uint16_t       len;
+    uint8_t       *reply;       /**< write the answer here */
+    uint16_t       reply_cap;
+    uint16_t       reply_len;   /**< how much of it you wrote */
+    uint8_t        error;       /**< an sbl_err_code, when refusing */
+} sbl_request;
+
+typedef enum {
+    SBL_REPLY  = 0,   /**< reply_len bytes are the answer */
+    SBL_DEFER  = 1,   /**< too slow to answer now: ACCEPTED goes out, then sbl_resolve() */
+    SBL_REFUSE = 2    /**< set req->error first */
+} sbl_action;
+
+typedef sbl_action (*sbl_handler_fn)(sbl_request *req, void *user);
+
+typedef struct {
+    uint16_t       id;
+    uint8_t        kinds;
+    sbl_handler_fn fn;
+    void          *user;
+} sbl_resource;
+
+/** A stream's configuration, as the host last set it. */
+typedef struct {
+    uint16_t id;
+    uint8_t  enabled;
+    uint16_t decimation;
+} sbl_stream_cfg;
+
+typedef struct {
+    const sbl_port        *port;
+    const sbl_device_info *info;
+    sbl_decoder            decoder;
+    sbl_resource           table[SBL_MAX_RESOURCES];
+    uint8_t                resources;
+    sbl_stream_cfg         streams[SBL_MAX_STREAMS];
+    uint8_t                stream_count;
+    uint8_t                log_level;
+    uint8_t                state;
+    uint32_t               alarms;
+    uint32_t               started_ms;
+    uint8_t                tx[SBL_MAX_ENCODED];   /**< held under port->lock */
+    uint8_t                reply[SBL_MAX_PAYLOAD];
+    uint32_t               sent;
+    uint32_t               dropped;               /**< frames that would not encode */
+} sbl_ctx;
+
+/** Default log level: 0 off, 1 error, 2 warn, 3 info, 4 debug. */
+#define SBL_LOG_INFO 3
+
+void sbl_init(sbl_ctx *ctx, const sbl_port *port, const sbl_device_info *info);
+
+/** Register a resource. Returns 0, or SBL_E_TOO_BIG when the table is full. */
+int sbl_add(sbl_ctx *ctx, uint16_t id, uint8_t kinds, sbl_handler_fn fn, void *user);
+
+/** Feed bytes from the wire. Replies are sent from inside this call. */
+void sbl_feed(sbl_ctx *ctx, const uint8_t *data, size_t len);
+
+/** Answer a deferred CALL: an EVT carrying ASYNC and the seq of the request. */
+void sbl_resolve(sbl_ctx *ctx, uint16_t id, uint8_t seq,
+                 const uint8_t *payload, uint16_t len);
+
+/** A spontaneous event. */
+void sbl_emit(sbl_ctx *ctx, uint16_t id, const uint8_t *payload, uint16_t len);
+
+/** Stream samples, already thinned by the configured decimation. */
+void sbl_stream(sbl_ctx *ctx, uint16_t id, const uint8_t *samples, uint16_t len);
+
+/** A log line. Dropped if the host has asked for a quieter level. */
+void sbl_log(sbl_ctx *ctx, uint8_t level, const char *text, uint16_t len);
+
+/** What STATUS reports, and what the host sees in the session pill. */
+void sbl_set_state(sbl_ctx *ctx, uint8_t state, uint32_t alarms);
+
+/** How the host last configured a stream. Applying it is the application's job. */
+const sbl_stream_cfg *sbl_stream_config(const sbl_ctx *ctx, uint16_t id);
+
 #ifdef __cplusplus
 }
 #endif

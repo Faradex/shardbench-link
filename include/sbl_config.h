@@ -28,4 +28,14 @@
  */
 #define SBL_MAX_ENCODED (SBL_MAX_BODY + (SBL_MAX_BODY / 254) + 2)
 
+/** Resources the device may register. Costs 16 bytes each on a 32-bit target. */
+#ifndef SBL_MAX_RESOURCES
+#define SBL_MAX_RESOURCES 24
+#endif
+
+/** Streams whose configuration is remembered. BMU-1ch declares one. */
+#ifndef SBL_MAX_STREAMS
+#define SBL_MAX_STREAMS 4
+#endif
+
 #endif /* SBL_CONFIG_H */
