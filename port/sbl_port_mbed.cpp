@@ -4,16 +4,19 @@
 
 namespace sbl {
 
-/**
- * Buffer for stdout, so a printf reaches us as one write instead of a dozen.
+/*
+ * No buffer for stdout, deliberately -- and this is the opposite of what it looks like.
  *
- * Mbed leaves the console unbuffered, which means `printf("[%s][%s]: ...", ...)` calls
- * write() once per conversion -- and two threads inside printf at the same time then
- * lose characters inside newlib, above anything this library can see. Line buffering
- * closes that window: the text accumulates in newlib's own buffer and is handed over
- * once, at the newline.
+ * newlib keeps one buffer for stdout, shared by every thread that prints. Two threads
+ * in printf at once corrupt it: the tracing build showed a 62-byte write arriving cut
+ * off mid-word, "[WARNING][BMUSensing]: Positive temperature s", with another thread's
+ * line spliced on after it. The damage is done before any of this code is reached, so
+ * no amount of care in the FileHandle can undo it.
+ *
+ * Unbuffered, newlib has nothing to corrupt: every character is handed straight over,
+ * and sbl_console then reassembles the lines per writing thread, which it is tested to
+ * do correctly. Buffering here would be an optimisation that costs correctness.
  */
-static char stdout_buffer[256];
 
 /** Bytes pulled off the UART per read. A STREAM frame is a few hundred. */
 static const size_t RX_CHUNK = 128;
@@ -160,10 +163,9 @@ void Link::start(osPriority priority)
        host would have nothing listening for a board it has not probed yet. */
     _console.attach(&_ctx);
 
-    /* Line buffering, for the reason given where the buffer is declared. Set here
-       rather than in the application, because it is part of making this console work
-       and is easy to forget. */
-    setvbuf(stdout, stdout_buffer, _IOLBF, sizeof(stdout_buffer));
+    /* Forced, not merely left alone: what Mbed leaves stdout set to varies, and a
+       shared buffer is what breaks the log. See the note at the top of this file. */
+    setvbuf(stdout, NULL, _IONBF, 0);
 
     /* The marker goes out from the thread, a moment from now: sent here it would land
        in the line transient that follows a reset, which is where the first frame of

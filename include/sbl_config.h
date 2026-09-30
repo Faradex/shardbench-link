@@ -58,7 +58,7 @@
 
 /** Bumped whenever the library changes in a way worth telling a board apart by. */
 #ifndef SBL_BUILD_MARKER
-#define SBL_BUILD_MARKER "trace build 6"
+#define SBL_BUILD_MARKER "unbuffered stdout, build 7"
 #endif
 
 /**
