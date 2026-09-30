@@ -115,16 +115,21 @@ void Link::start(osPriority priority)
     /* Only now: a log frame sent before the thread exists would still go out, but the
        host would have nothing listening for a board it has not probed yet. */
     _console.attach(&_ctx);
-
-    /* First line of the session, and a positive marker: a board that does not say this
-       is running an older build, which is otherwise tedious to establish. */
-    sbl_log(&_ctx, SBL_LOG_INFO, "[shardbench-link] " SBL_BUILD_MARKER,
-            (uint16_t)(sizeof("[shardbench-link] " SBL_BUILD_MARKER) - 1));
+    /* The marker goes out from the thread, a moment from now: sent here it would land
+       in the line transient that follows a reset, which is where the first frame of
+       every session has been disappearing. */
 }
 
 void Link::rx_thread()
 {
     uint8_t chunk[RX_CHUNK];
+
+    /* Past the reset transient, and sent with sbl_log directly rather than through the
+       console: if this arrives while ordinary log lines are still damaged, the fault is
+       in the console and not in the link underneath it. */
+    rtos::ThisThread::sleep_for(std::chrono::milliseconds(300));
+    sbl_log(&_ctx, SBL_LOG_INFO, "[shardbench-link] " SBL_BUILD_MARKER,
+            (uint16_t)(sizeof("[shardbench-link] " SBL_BUILD_MARKER) - 1));
 
     while (_running) {
         ssize_t n = _serial.read(chunk, sizeof(chunk));

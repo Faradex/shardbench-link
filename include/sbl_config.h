@@ -58,7 +58,7 @@
 
 /** Bumped whenever the library changes in a way worth telling a board apart by. */
 #ifndef SBL_BUILD_MARKER
-#define SBL_BUILD_MARKER "console under test, level from text"
+#define SBL_BUILD_MARKER "marker from the rx thread, build 4"
 #endif
 
 #endif /* SBL_CONFIG_H */
