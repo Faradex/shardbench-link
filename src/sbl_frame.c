@@ -19,7 +19,9 @@ static uint16_t get_u16(const uint8_t *at)
     return (uint16_t)((uint16_t)at[0] | ((uint16_t)at[1] << 8));
 }
 
-long sbl_encode(const sbl_frame *frame, uint8_t *out, size_t cap)
+long sbl_encode_parts(const sbl_frame *frame,
+                      const uint8_t *prefix, uint16_t prefix_len,
+                      uint8_t *out, size_t cap)
 {
     uint8_t header[SBL_HEADER_SIZE];
     sbl_cobs_enc enc;
@@ -39,9 +41,16 @@ long sbl_encode(const sbl_frame *frame, uint8_t *out, size_t cap)
     put_u16(&header[5], frame->id);
     put_u16(&header[7], frame->len);
 
+    if (prefix_len > frame->len) {
+        return SBL_E_LENGTH;
+    }
+
     crc = sbl_crc16(header, SBL_HEADER_SIZE, 0xFFFFu);
-    if (frame->len) {
-        crc = sbl_crc16(frame->payload, frame->len, crc);
+    if (prefix_len) {
+        crc = sbl_crc16(prefix, prefix_len, crc);
+    }
+    if (frame->len > prefix_len) {
+        crc = sbl_crc16(frame->payload, (size_t)(frame->len - prefix_len), crc);
     }
 
     /* Encoded straight into the caller's buffer: the body is never assembled, so this
@@ -50,7 +59,10 @@ long sbl_encode(const sbl_frame *frame, uint8_t *out, size_t cap)
     for (i = 0; i < SBL_HEADER_SIZE; i++) {
         sbl_cobs_put(&enc, header[i]);
     }
-    for (i = 0; i < frame->len; i++) {
+    for (i = 0; i < prefix_len; i++) {
+        sbl_cobs_put(&enc, prefix[i]);
+    }
+    for (i = 0; i < (uint16_t)(frame->len - prefix_len); i++) {
         sbl_cobs_put(&enc, frame->payload[i]);
     }
     sbl_cobs_put(&enc, (uint8_t)(crc & 0xFFu));
@@ -65,6 +77,11 @@ long sbl_encode(const sbl_frame *frame, uint8_t *out, size_t cap)
     }
     out[encoded] = 0x00;            /* the delimiter is part of the frame */
     return encoded + 1;
+}
+
+long sbl_encode(const sbl_frame *frame, uint8_t *out, size_t cap)
+{
+    return sbl_encode_parts(frame, NULL, 0, out, cap);
 }
 
 int sbl_decode_block(const uint8_t *block, size_t len,

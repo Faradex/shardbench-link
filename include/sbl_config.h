@@ -19,6 +19,9 @@
 #define SBL_HEADER_SIZE 9
 #define SBL_CRC_SIZE    2
 
+/** A STREAM payload opens with tick_ms u32, period_us u32, count u16. */
+#define SBL_STREAM_HEADER_SIZE 10
+
 /** Header + payload + CRC: what the CRC is computed over, plus the CRC itself. */
 #define SBL_MAX_BODY (SBL_HEADER_SIZE + SBL_MAX_PAYLOAD + SBL_CRC_SIZE)
 

@@ -89,8 +89,12 @@ public:
     void add(uint16_t id, uint8_t kinds, sbl_handler_fn fn, void *user = nullptr);
     void emit(uint16_t id, const void *payload, uint16_t len);
     void resolve(uint16_t id, uint8_t seq, const void *payload, uint16_t len);
-    void stream(uint16_t id, const void *samples, uint16_t len);
+    void stream(uint16_t id, uint32_t tick_ms, uint32_t period_us,
+                const void *samples, uint16_t count, uint8_t sample_bytes);
     void set_state(uint8_t state, uint32_t alarms);
+    /** The link's own millisecond clock, so a timestamp an application hands back --
+        a stream batch's tick -- is on the same time base the link runs on. */
+    uint32_t tick_ms() const;
     const sbl_stream_cfg *stream_config(uint16_t id) const;
 
 private:

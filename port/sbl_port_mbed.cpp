@@ -235,14 +235,20 @@ void Link::resolve(uint16_t id, uint8_t seq, const void *payload, uint16_t len)
     sbl_resolve(&_ctx, id, seq, static_cast<const uint8_t *>(payload), len);
 }
 
-void Link::stream(uint16_t id, const void *samples, uint16_t len)
+void Link::stream(uint16_t id, uint32_t tick_ms, uint32_t period_us,
+                  const void *samples, uint16_t count, uint8_t sample_bytes)
 {
-    sbl_stream(&_ctx, id, static_cast<const uint8_t *>(samples), len);
+    sbl_stream(&_ctx, id, tick_ms, period_us, samples, count, sample_bytes);
 }
 
 void Link::set_state(uint8_t state, uint32_t alarms)
 {
     sbl_set_state(&_ctx, state, alarms);
+}
+
+uint32_t Link::tick_ms() const
+{
+    return port_tick_ms(nullptr);
 }
 
 const sbl_stream_cfg *Link::stream_config(uint16_t id) const

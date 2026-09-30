@@ -253,8 +253,18 @@ void sbl_resolve(sbl_ctx *ctx, uint16_t id, uint8_t seq,
 /** A spontaneous event. */
 void sbl_emit(sbl_ctx *ctx, uint16_t id, const uint8_t *payload, uint16_t len);
 
-/** Stream samples, already thinned by the configured decimation. */
-void sbl_stream(sbl_ctx *ctx, uint16_t id, const uint8_t *samples, uint16_t len);
+/**
+ * Stream samples, already thinned by the configured decimation.
+ *
+ * `tick_ms` is when the *first* sample of the batch was taken, not when the batch is
+ * being sent: the host spaces the rest out by `period_us` from there, so stamping at
+ * send time would put the whole batch late by the time it took to fill.
+ *
+ * Samples are counted, not measured: `count` of them, `sample_bytes` each. The header
+ * the host expects in front of them is written here rather than by the application.
+ */
+void sbl_stream(sbl_ctx *ctx, uint16_t id, uint32_t tick_ms, uint32_t period_us,
+                const void *samples, uint16_t count, uint8_t sample_bytes);
 
 /** A log line. Dropped if the host has asked for a quieter level. */
 void sbl_log(sbl_ctx *ctx, uint8_t level, const char *text, uint16_t len);

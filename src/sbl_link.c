@@ -42,8 +42,9 @@ static uint16_t text_len(const char *s, uint16_t cap)
 
 /* --- sending --------------------------------------------------------------- */
 
-static void send(sbl_ctx *ctx, uint8_t type, uint16_t id, uint8_t seq, uint8_t flags,
-                 const uint8_t *payload, uint16_t len)
+static void send_parts(sbl_ctx *ctx, uint8_t type, uint16_t id, uint8_t seq,
+                       uint8_t flags, const uint8_t *prefix, uint16_t prefix_len,
+                       const uint8_t *payload, uint16_t len)
 {
     sbl_frame frame;
     long written;
@@ -54,11 +55,11 @@ static void send(sbl_ctx *ctx, uint8_t type, uint16_t id, uint8_t seq, uint8_t f
     frame.flags = flags;
     frame.seq = seq;
     frame.id = id;
-    frame.len = len;
+    frame.len = (uint16_t)(prefix_len + len);
     frame.payload = payload;
 
     ctx->port->lock(ctx->port->io);
-    written = sbl_encode(&frame, ctx->tx, sizeof(ctx->tx));
+    written = sbl_encode_parts(&frame, prefix, prefix_len, ctx->tx, sizeof(ctx->tx));
     if (written > 0) {
         ctx->port->write(ctx->port->io, ctx->tx, (size_t)written);
         ctx->sent++;
@@ -68,6 +69,12 @@ static void send(sbl_ctx *ctx, uint8_t type, uint16_t id, uint8_t seq, uint8_t f
         ctx->dropped++;
     }
     ctx->port->unlock(ctx->port->io);
+}
+
+static void send(sbl_ctx *ctx, uint8_t type, uint16_t id, uint8_t seq, uint8_t flags,
+                 const uint8_t *payload, uint16_t len)
+{
+    send_parts(ctx, type, id, seq, flags, NULL, 0, payload, len);
 }
 
 static void send_err(sbl_ctx *ctx, uint16_t id, uint8_t seq, uint8_t code)
@@ -88,9 +95,26 @@ void sbl_resolve(sbl_ctx *ctx, uint16_t id, uint8_t seq,
     send(ctx, SBL_EVT, id, seq, SBL_FLAG_ASYNC, payload, len);
 }
 
-void sbl_stream(sbl_ctx *ctx, uint16_t id, const uint8_t *samples, uint16_t len)
+void sbl_stream(sbl_ctx *ctx, uint16_t id, uint32_t tick_ms, uint32_t period_us,
+                const void *samples, uint16_t count, uint8_t sample_bytes)
 {
-    send(ctx, SBL_STREAM, id, 0, SBL_FLAG_NONE, samples, len);
+    uint8_t head[SBL_STREAM_HEADER_SIZE];
+    uint32_t bytes = (uint32_t)count * (uint32_t)sample_bytes;
+
+    /* The samples are the application's; the header in front of them is the protocol's,
+       and belongs here so there is one place that can get it wrong. */
+    if (bytes + SBL_STREAM_HEADER_SIZE > SBL_MAX_PAYLOAD) {
+        ctx->dropped++;
+        return;
+    }
+
+    put_u32(&head[0], tick_ms);
+    put_u32(&head[4], period_us);
+    put_u16(&head[8], count);
+
+    send_parts(ctx, SBL_STREAM, id, 0, SBL_FLAG_NONE,
+               head, SBL_STREAM_HEADER_SIZE,
+               (const uint8_t *)samples, (uint16_t)bytes);
 }
 
 void sbl_log(sbl_ctx *ctx, uint8_t level, const char *text, uint16_t len)

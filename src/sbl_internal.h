@@ -30,4 +30,16 @@ void sbl_cobs_begin(sbl_cobs_enc *e, uint8_t *out, size_t cap);
 void sbl_cobs_put(sbl_cobs_enc *e, uint8_t byte);
 long sbl_cobs_end(sbl_cobs_enc *e);
 
+/**
+ * Encode a frame whose payload arrives in two pieces, `prefix` first.
+ *
+ * `frame->len` is the length of both together. It exists for STREAM, whose payload is a
+ * small header this library writes followed by samples the application owns: copying the
+ * two into one buffer would put half a kilobyte on the measurement thread's stack, which
+ * is the cost the incremental encoder was built to avoid.
+ */
+long sbl_encode_parts(const sbl_frame *frame,
+                      const uint8_t *prefix, uint16_t prefix_len,
+                      uint8_t *out, size_t cap);
+
 #endif /* SBL_INTERNAL_H */
