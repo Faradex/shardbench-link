@@ -68,8 +68,19 @@ class Link {
 public:
     Link(mbed::BufferedSerial &serial, const sbl_device_info &info);
 
-    /** Below the measurement threads: a late log matters less than a late sample. */
-    void start(osPriority priority = osPriorityBelowNormal);
+    /**
+     * Above the measurement threads, and this is worth arguing about.
+     *
+     * Below them looks right -- a late log matters less than a late sample -- and it is
+     * wrong. The thread does almost nothing: read a few bytes, answer, sleep again. But
+     * it is the only thread that answers the host, and the monitors here bit-bang a
+     * 1-Wire bus with busy waits that never yield, so at a lower priority it simply
+     * never runs. The board keeps logging, because logs are written by whichever thread
+     * called printf, and stops answering anything: it looks dead while sounding alive.
+     *
+     * Lower it if the microseconds it steals ever disturb a measurement.
+     */
+    void start(osPriority priority = osPriorityAboveNormal);
 
     sbl_ctx *ctx() { return &_ctx; }
     ConsoleToLog &console() { return _console; }

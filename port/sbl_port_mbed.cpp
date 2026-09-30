@@ -140,7 +140,7 @@ uint32_t Link::port_tick_ms(void *)
 }
 
 Link::Link(mbed::BufferedSerial &serial, const sbl_device_info &info)
-    : _serial(serial), _console(serial), _thread(osPriorityBelowNormal, RX_STACK),
+    : _serial(serial), _console(serial), _thread(osPriorityAboveNormal, RX_STACK),
       _running(false)
 {
     _port.write = &Link::port_write;
