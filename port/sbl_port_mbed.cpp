@@ -235,6 +235,11 @@ void Link::resolve(uint16_t id, uint8_t seq, const void *payload, uint16_t len)
     sbl_resolve(&_ctx, id, seq, static_cast<const uint8_t *>(payload), len);
 }
 
+void Link::fail(uint16_t id, uint8_t seq, uint8_t code)
+{
+    sbl_fail(&_ctx, id, seq, code);
+}
+
 void Link::stream(uint16_t id, uint32_t tick_ms, uint32_t period_us,
                   const void *samples, uint16_t count, uint8_t sample_bytes)
 {

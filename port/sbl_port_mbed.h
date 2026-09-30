@@ -89,6 +89,7 @@ public:
     void add(uint16_t id, uint8_t kinds, sbl_handler_fn fn, void *user = nullptr);
     void emit(uint16_t id, const void *payload, uint16_t len);
     void resolve(uint16_t id, uint8_t seq, const void *payload, uint16_t len);
+    void fail(uint16_t id, uint8_t seq, uint8_t code);
     void stream(uint16_t id, uint32_t tick_ms, uint32_t period_us,
                 const void *samples, uint16_t count, uint8_t sample_bytes);
     void set_state(uint8_t state, uint32_t alarms);

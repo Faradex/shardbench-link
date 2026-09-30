@@ -82,6 +82,11 @@ static void send_err(sbl_ctx *ctx, uint16_t id, uint8_t seq, uint8_t code)
     send(ctx, SBL_ERR, id, seq, SBL_FLAG_NONE, &code, 1);
 }
 
+void sbl_fail(sbl_ctx *ctx, uint16_t id, uint8_t seq, uint8_t code)
+{
+    send(ctx, SBL_ERR, id, seq, SBL_FLAG_ASYNC, &code, 1);
+}
+
 void sbl_emit(sbl_ctx *ctx, uint16_t id, const uint8_t *payload, uint16_t len)
 {
     send(ctx, SBL_EVT, id, 0, SBL_FLAG_NONE, payload, len);

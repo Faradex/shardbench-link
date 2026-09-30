@@ -250,6 +250,15 @@ void sbl_feed(sbl_ctx *ctx, const uint8_t *data, size_t len);
 void sbl_resolve(sbl_ctx *ctx, uint16_t id, uint8_t seq,
                  const uint8_t *payload, uint16_t len);
 
+/**
+ * Give up on a deferred CALL: an ERR carrying ASYNC and the seq of the request.
+ *
+ * The counterpart of sbl_resolve(). A handler that returned SBL_DEFER has promised an
+ * answer, and the host is holding the sequence number until one arrives; a failure that
+ * is simply not reported keeps that promise open forever.
+ */
+void sbl_fail(sbl_ctx *ctx, uint16_t id, uint8_t seq, uint8_t code);
+
 /** A spontaneous event. */
 void sbl_emit(sbl_ctx *ctx, uint16_t id, const uint8_t *payload, uint16_t len);
 
