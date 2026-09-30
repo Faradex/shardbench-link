@@ -1,6 +1,19 @@
 #include "sbl_port_mbed.h"
 
+#include <stdio.h>
+
 namespace sbl {
+
+/**
+ * Buffer for stdout, so a printf reaches us as one write instead of a dozen.
+ *
+ * Mbed leaves the console unbuffered, which means `printf("[%s][%s]: ...", ...)` calls
+ * write() once per conversion -- and two threads inside printf at the same time then
+ * lose characters inside newlib, above anything this library can see. Line buffering
+ * closes that window: the text accumulates in newlib's own buffer and is handed over
+ * once, at the newline.
+ */
+static char stdout_buffer[256];
 
 /** Bytes pulled off the UART per read. A STREAM frame is a few hundred. */
 static const size_t RX_CHUNK = 128;
@@ -115,6 +128,12 @@ void Link::start(osPriority priority)
     /* Only now: a log frame sent before the thread exists would still go out, but the
        host would have nothing listening for a board it has not probed yet. */
     _console.attach(&_ctx);
+
+    /* Line buffering, for the reason given where the buffer is declared. Set here
+       rather than in the application, because it is part of making this console work
+       and is easy to forget. */
+    setvbuf(stdout, stdout_buffer, _IOLBF, sizeof(stdout_buffer));
+
     /* The marker goes out from the thread, a moment from now: sent here it would land
        in the line transient that follows a reset, which is where the first frame of
        every session has been disappearing. */
