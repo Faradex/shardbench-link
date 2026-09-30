@@ -41,20 +41,15 @@ public:
     int isatty() override;
 
 private:
-    /** One thread's line, as far as it has got. */
-    struct Line {
-        osThreadId_t owner;
-        uint16_t     fill;
-        char         text[SBL_CONSOLE_LINE];
-    };
-
-    Line *slot_for(osThreadId_t thread);
-    void flush(Line &line);
+    /** Where a finished line goes. Static so the C core can call back into it. */
+    static void on_line(uint8_t level, const char *text, uint16_t len, void *user);
 
     mbed::BufferedSerial &_serial;
     sbl_ctx    *_ctx;
     rtos::Mutex _lock;
-    Line        _lines[SBL_CONSOLE_SLOTS];
+    /* The line assembly itself lives in the platform-free half, under test: it is the
+       part that got the interleaving wrong twice, and here it cannot be tested. */
+    sbl_console _console;
 };
 
 /**

@@ -263,6 +263,37 @@ void sbl_set_state(sbl_ctx *ctx, uint8_t state, uint32_t alarms);
 /** How the host last configured a stream. Applying it is the application's job. */
 const sbl_stream_cfg *sbl_stream_config(const sbl_ctx *ctx, uint16_t id);
 
+/* --- the console ----------------------------------------------------------- */
+
+/** One writer's line, as far as it has got. */
+typedef struct {
+    const void *owner;
+    uint16_t    fill;
+    char        text[SBL_CONSOLE_LINE];
+} sbl_line;
+
+typedef struct {
+    sbl_line lines[SBL_CONSOLE_SLOTS];
+} sbl_console;
+
+/** Called with each finished line. The text no longer carries its level prefix. */
+typedef void (*sbl_console_fn)(uint8_t level, const char *text, uint16_t len, void *user);
+
+void sbl_console_init(sbl_console *c);
+void sbl_console_reset(sbl_console *c);
+
+/**
+ * Feed one write. `owner` identifies the writer -- a thread id on a device -- and
+ * exists because printf is not atomic: without it, two writers building a line at the
+ * same time produce text belonging to neither.
+ */
+void sbl_console_write(sbl_console *c, const void *owner,
+                       const char *data, size_t len,
+                       sbl_console_fn out, void *user);
+
+/** The level the line announces, and how many bytes of prefix to drop. */
+uint8_t sbl_console_level(const char *line, uint16_t len, uint16_t *skip);
+
 #ifdef __cplusplus
 }
 #endif

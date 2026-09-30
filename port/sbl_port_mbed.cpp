@@ -12,108 +12,24 @@ static const uint32_t RX_STACK = 2048;
 ConsoleToLog::ConsoleToLog(mbed::BufferedSerial &serial)
     : _serial(serial), _ctx(nullptr)
 {
-    for (unsigned i = 0; i < SBL_CONSOLE_SLOTS; i++) {
-        _lines[i].owner = nullptr;
-        _lines[i].fill = 0;
-    }
-}
-
-/**
- * Read the level out of the text, because printf cannot carry one.
- *
- * Every line the SDK and the application produce starts "[LEVEL][MODULE]: ", so the
- * level is there to be had. Taking it means the host can colour the line, filter on it,
- * and honour SET LOG_LEVEL properly -- and that the log does not read "[INFO] [ERROR]".
- * The module tag stays: it is the useful half.
- */
-static uint8_t level_from(const char *line, uint16_t len, uint16_t *skip)
-{
-    static const struct { const char *name; uint8_t len; uint8_t level; } LEVELS[] = {
-        {"[ERROR]",   7, 1},
-        {"[WARNING]", 9, 2},
-        {"[INFO]",    6, 3},
-        {"[DEBUG]",   7, 4},
-    };
-    unsigned i, c;
-
-    *skip = 0;
-    for (i = 0; i < sizeof(LEVELS) / sizeof(LEVELS[0]); i++) {
-        if (len < LEVELS[i].len) {
-            continue;
-        }
-        for (c = 0; c < LEVELS[i].len; c++) {
-            if (line[c] != LEVELS[i].name[c]) {
-                break;
-            }
-        }
-        if (c == LEVELS[i].len) {
-            *skip = LEVELS[i].len;
-            return LEVELS[i].level;
-        }
-    }
-    return SBL_LOG_INFO;
+    sbl_console_init(&_console);
 }
 
 void ConsoleToLog::attach(sbl_ctx *ctx)
 {
     _lock.lock();
     _ctx = ctx;
-    for (unsigned i = 0; i < SBL_CONSOLE_SLOTS; i++) {
-        _lines[i].owner = nullptr;      /* half-written text belongs to the raw era */
-        _lines[i].fill = 0;
-    }
+    sbl_console_reset(&_console);   /* half-written text belongs to the raw era */
     _lock.unlock();
 }
 
-void ConsoleToLog::flush(Line &line)
+void ConsoleToLog::on_line(uint8_t level, const char *text, uint16_t len, void *user)
 {
-    uint16_t skip = 0;
-    uint8_t level;
-
-    if (line.fill > 0 && _ctx != nullptr) {
-        level = level_from(line.text, line.fill, &skip);
-        sbl_log(_ctx, level, &line.text[skip], (uint16_t)(line.fill - skip));
-    }
-    line.fill = 0;
-    line.owner = nullptr;
-}
-
-/**
- * The buffer this thread is building its line in.
- *
- * With every slot taken by a thread mid-line, the fullest one is sent early and reused.
- * That loses the tail of one line rather than refusing to print at all, and it can only
- * happen with more threads printing at once than there are slots.
- */
-ConsoleToLog::Line *ConsoleToLog::slot_for(osThreadId_t thread)
-{
-    unsigned i, fullest = 0;
-
-    for (i = 0; i < SBL_CONSOLE_SLOTS; i++) {
-        if (_lines[i].owner == thread) {
-            return &_lines[i];
-        }
-    }
-    for (i = 0; i < SBL_CONSOLE_SLOTS; i++) {
-        if (_lines[i].owner == nullptr) {
-            _lines[i].owner = thread;
-            return &_lines[i];
-        }
-    }
-    for (i = 1; i < SBL_CONSOLE_SLOTS; i++) {
-        if (_lines[i].fill > _lines[fullest].fill) {
-            fullest = i;
-        }
-    }
-    flush(_lines[fullest]);
-    _lines[fullest].owner = thread;
-    return &_lines[fullest];
+    sbl_log(static_cast<sbl_ctx *>(user), level, text, len);
 }
 
 ssize_t ConsoleToLog::write(const void *buffer, size_t size)
 {
-    const char *text = static_cast<const char *>(buffer);
-
     /* Before the link exists, and from an interrupt, straight to the port. Mbed's
        error handler prints the crash through here, and it must survive. */
     if (_ctx == nullptr || core_util_is_isr_active()) {
@@ -121,24 +37,11 @@ ssize_t ConsoleToLog::write(const void *buffer, size_t size)
     }
 
     _lock.lock();
-    Line *line = slot_for(osThreadGetId());
-
-    for (size_t i = 0; i < size; i++) {
-        char c = text[i];
-        if (c == '\r') {
-            continue;                       /* the "\n\r" the debug macro appends */
-        }
-        if (c == '\n') {
-            flush(*line);
-            line->owner = osThreadGetId();  /* keep the slot: more may follow */
-            continue;
-        }
-        if (line->fill >= SBL_CONSOLE_LINE) {
-            flush(*line);                   /* a line longer than the buffer splits */
-            line->owner = osThreadGetId();
-        }
-        line->text[line->fill++] = c;
-    }
+    /* The thread id is what tells one printf from another: they interleave, because
+       printf is not atomic and this console is not buffered. */
+    sbl_console_write(&_console, osThreadGetId(),
+                      static_cast<const char *>(buffer), size,
+                      &ConsoleToLog::on_line, _ctx);
     _lock.unlock();
     return static_cast<ssize_t>(size);
 }
