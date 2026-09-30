@@ -10,8 +10,12 @@ static const uint32_t RX_STACK = 2048;
 // --- the console ------------------------------------------------------------
 
 ConsoleToLog::ConsoleToLog(mbed::BufferedSerial &serial)
-    : _serial(serial), _ctx(nullptr), _fill(0), _owner(nullptr)
+    : _serial(serial), _ctx(nullptr)
 {
+    for (unsigned i = 0; i < SBL_CONSOLE_SLOTS; i++) {
+        _lines[i].owner = nullptr;
+        _lines[i].fill = 0;
+    }
 }
 
 /**
@@ -54,25 +58,56 @@ void ConsoleToLog::attach(sbl_ctx *ctx)
 {
     _lock.lock();
     _ctx = ctx;
-    _fill = 0;              /* whatever was half-written belongs to the raw era */
-    _owner = nullptr;
+    for (unsigned i = 0; i < SBL_CONSOLE_SLOTS; i++) {
+        _lines[i].owner = nullptr;      /* half-written text belongs to the raw era */
+        _lines[i].fill = 0;
+    }
     _lock.unlock();
 }
 
-void ConsoleToLog::flush_line()
+void ConsoleToLog::flush(Line &line)
 {
     uint16_t skip = 0;
     uint8_t level;
 
-    if (_fill == 0 || _ctx == nullptr) {
-        _fill = 0;
-        _owner = nullptr;
-        return;
+    if (line.fill > 0 && _ctx != nullptr) {
+        level = level_from(line.text, line.fill, &skip);
+        sbl_log(_ctx, level, &line.text[skip], (uint16_t)(line.fill - skip));
     }
-    level = level_from(_line, _fill, &skip);
-    sbl_log(_ctx, level, &_line[skip], (uint16_t)(_fill - skip));
-    _fill = 0;
-    _owner = nullptr;
+    line.fill = 0;
+    line.owner = nullptr;
+}
+
+/**
+ * The buffer this thread is building its line in.
+ *
+ * With every slot taken by a thread mid-line, the fullest one is sent early and reused.
+ * That loses the tail of one line rather than refusing to print at all, and it can only
+ * happen with more threads printing at once than there are slots.
+ */
+ConsoleToLog::Line *ConsoleToLog::slot_for(osThreadId_t thread)
+{
+    unsigned i, fullest = 0;
+
+    for (i = 0; i < SBL_CONSOLE_SLOTS; i++) {
+        if (_lines[i].owner == thread) {
+            return &_lines[i];
+        }
+    }
+    for (i = 0; i < SBL_CONSOLE_SLOTS; i++) {
+        if (_lines[i].owner == nullptr) {
+            _lines[i].owner = thread;
+            return &_lines[i];
+        }
+    }
+    for (i = 1; i < SBL_CONSOLE_SLOTS; i++) {
+        if (_lines[i].fill > _lines[fullest].fill) {
+            fullest = i;
+        }
+    }
+    flush(_lines[fullest]);
+    _lines[fullest].owner = thread;
+    return &_lines[fullest];
 }
 
 ssize_t ConsoleToLog::write(const void *buffer, size_t size)
@@ -86,15 +121,7 @@ ssize_t ConsoleToLog::write(const void *buffer, size_t size)
     }
 
     _lock.lock();
-
-    /* A different thread starting to print means the line in the buffer will never be
-       finished by its owner. Sending it now costs a truncated line; letting the two be
-       spliced together costs both of them. */
-    osThreadId_t me = osThreadGetId();
-    if (_fill > 0 && _owner != me) {
-        flush_line();
-    }
-    _owner = me;
+    Line *line = slot_for(osThreadGetId());
 
     for (size_t i = 0; i < size; i++) {
         char c = text[i];
@@ -102,13 +129,15 @@ ssize_t ConsoleToLog::write(const void *buffer, size_t size)
             continue;                       /* the "\n\r" the debug macro appends */
         }
         if (c == '\n') {
-            flush_line();
+            flush(*line);
+            line->owner = osThreadGetId();  /* keep the slot: more may follow */
             continue;
         }
-        if (_fill >= sizeof(_line)) {
-            flush_line();                   /* a line longer than the buffer splits */
+        if (line->fill >= SBL_CONSOLE_LINE) {
+            flush(*line);                   /* a line longer than the buffer splits */
+            line->owner = osThreadGetId();
         }
-        _line[_fill++] = c;
+        line->text[line->fill++] = c;
     }
     _lock.unlock();
     return static_cast<ssize_t>(size);

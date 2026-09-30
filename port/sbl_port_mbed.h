@@ -41,17 +41,20 @@ public:
     int isatty() override;
 
 private:
-    void flush_line();
+    /** One thread's line, as far as it has got. */
+    struct Line {
+        osThreadId_t owner;
+        uint16_t     fill;
+        char         text[SBL_CONSOLE_LINE];
+    };
+
+    Line *slot_for(osThreadId_t thread);
+    void flush(Line &line);
 
     mbed::BufferedSerial &_serial;
-    sbl_ctx  *_ctx;
+    sbl_ctx    *_ctx;
     rtos::Mutex _lock;
-    char      _line[160];
-    uint16_t  _fill;
-    /** Whose partial line is in the buffer. printf is not atomic: it reaches us in
-        several writes, so another thread printing in between would otherwise splice
-        its text into the middle of this one. */
-    osThreadId_t _owner;
+    Line        _lines[SBL_CONSOLE_SLOTS];
 };
 
 /**

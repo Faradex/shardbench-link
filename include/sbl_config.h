@@ -38,4 +38,22 @@
 #define SBL_MAX_STREAMS 4
 #endif
 
+/** Longest log line kept whole; anything past this is split across two frames. */
+#ifndef SBL_CONSOLE_LINE
+#define SBL_CONSOLE_LINE 160
+#endif
+
+/**
+ * Threads that can be part-way through a printf at the same time.
+ *
+ * printf is not atomic and Mbed's console is usually unbuffered, so a line reaches the
+ * handle a few characters at a time. One buffer shared between threads gets their text
+ * spliced together; one buffer per printing thread does not. Four covers this firmware
+ * (main, the two monitors, the link) with room to spare, and costs SBL_CONSOLE_LINE
+ * bytes each.
+ */
+#ifndef SBL_CONSOLE_SLOTS
+#define SBL_CONSOLE_SLOTS 4
+#endif
+
 #endif /* SBL_CONFIG_H */
