@@ -48,6 +48,10 @@ private:
     rtos::Mutex _lock;
     char      _line[160];
     uint16_t  _fill;
+    /** Whose partial line is in the buffer. printf is not atomic: it reaches us in
+        several writes, so another thread printing in between would otherwise splice
+        its text into the middle of this one. */
+    osThreadId_t _owner;
 };
 
 /**
