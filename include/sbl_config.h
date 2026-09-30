@@ -58,7 +58,7 @@
 
 /** Bumped whenever the library changes in a way worth telling a board apart by. */
 #ifndef SBL_BUILD_MARKER
-#define SBL_BUILD_MARKER "build 9"
+#define SBL_BUILD_MARKER "timing build 10"
 #endif
 
 /**

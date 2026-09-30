@@ -183,7 +183,23 @@ void Link::rx_thread()
     sbl_log(&_ctx, SBL_LOG_INFO, "[shardbench-link] " SBL_BUILD_MARKER,
             (uint16_t)(sizeof("[shardbench-link] " SBL_BUILD_MARKER) - 1));
 
+    uint32_t next_report = port_tick_ms(nullptr) + 5000;
+
     while (_running) {
+        /* A count of what has been asked and how long the slowest answer took, from
+           inside. The host cannot tell a slow board from a slow line; this can. */
+        if ((int32_t)(port_tick_ms(nullptr) - next_report) >= 0) {
+            char note[64];
+            int n = snprintf(note, sizeof(note), "[link] rx=%lu tx=%lu slowest=%lums",
+                             (unsigned long)_ctx.received, (unsigned long)_ctx.sent,
+                             (unsigned long)_ctx.slowest_ms);
+            if (n > 0) {
+                sbl_log(&_ctx, SBL_LOG_INFO, note, (uint16_t)n);
+            }
+            _ctx.slowest_ms = 0;
+            next_report += 5000;
+        }
+
         ssize_t n = _serial.read(chunk, sizeof(chunk));
         if (n > 0) {
             /* Handlers run here, on this stack, so they must not block for long. */

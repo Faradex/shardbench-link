@@ -273,10 +273,27 @@ static uint8_t kind_of(uint8_t type)
     return 0;
 }
 
+/**
+ * How long this took, from the frame being decoded to its answer being written.
+ *
+ * Measured on the device because measuring from the host cannot tell a slow board from
+ * a slow line: both look like a late reply.
+ */
+static void note_time(sbl_ctx *ctx, uint32_t started)
+{
+    uint32_t took = ctx->port->tick_ms(ctx->port->io) - started;
+
+    ctx->received++;
+    if (took > ctx->slowest_ms) {
+        ctx->slowest_ms = took;
+    }
+}
+
 static void dispatch(const sbl_frame *f, void *user)
 {
     sbl_ctx *ctx = (sbl_ctx *)user;
     uint8_t kind = kind_of(f->type);
+    uint32_t started = ctx->port->tick_ms(ctx->port->io);
     uint8_t i;
 
     /* Anything that is not a request is the host talking out of turn: a device never
@@ -291,6 +308,7 @@ static void dispatch(const sbl_frame *f, void *user)
     }
     if (f->id < 0x0100u) {
         if (handle_core(ctx, f)) {
+            note_time(ctx, started);
             return;
         }
     }
@@ -327,10 +345,12 @@ static void dispatch(const sbl_frame *f, void *user)
         } else {
             send_err(ctx, f->id, f->seq, req.error);
         }
+        note_time(ctx, started);
         return;
     }
 
     send_err(ctx, f->id, f->seq, SBL_ERR_UNKNOWN_ID);
+    note_time(ctx, started);
 }
 
 /* --- lifecycle ------------------------------------------------------------- */
@@ -346,6 +366,8 @@ void sbl_init(sbl_ctx *ctx, const sbl_port *port, const sbl_device_info *info)
     ctx->alarms = 0;
     ctx->sent = 0;
     ctx->dropped = 0;
+    ctx->received = 0;
+    ctx->slowest_ms = 0;
     ctx->started_ms = port->tick_ms(port->io);
     sbl_decoder_init(&ctx->decoder, dispatch, ctx);
 }

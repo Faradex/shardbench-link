@@ -231,6 +231,8 @@ typedef struct {
     uint8_t                reply[SBL_MAX_PAYLOAD];
     uint32_t               sent;
     uint32_t               dropped;               /**< frames that would not encode */
+    uint32_t               received;              /**< requests dispatched */
+    uint32_t               slowest_ms;            /**< longest a request took to answer */
 } sbl_ctx;
 
 /** Default log level: 0 off, 1 error, 2 warn, 3 info, 4 debug. */
