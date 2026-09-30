@@ -58,7 +58,7 @@
 
 /** Bumped whenever the library changes in a way worth telling a board apart by. */
 #ifndef SBL_BUILD_MARKER
-#define SBL_BUILD_MARKER "timing build 10"
+#define SBL_BUILD_MARKER "v1"
 #endif
 
 /**
@@ -67,6 +67,17 @@
  */
 #ifndef SBL_CONSOLE_TRACE
 #define SBL_CONSOLE_TRACE 0
+#endif
+
+/**
+ * Report link counters this often, in milliseconds; 0 disables it.
+ *
+ * What it answers: is the board slow, or is the line? `slowest` is measured from
+ * decoding a request to writing its answer, so a board reporting 0 ms while the host
+ * sees a second has proved the delay is not its doing.
+ */
+#ifndef SBL_LINK_STATS
+#define SBL_LINK_STATS 0
 #endif
 
 #endif /* SBL_CONFIG_H */

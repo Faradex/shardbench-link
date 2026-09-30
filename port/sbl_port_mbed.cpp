@@ -183,11 +183,16 @@ void Link::rx_thread()
     sbl_log(&_ctx, SBL_LOG_INFO, "[shardbench-link] " SBL_BUILD_MARKER,
             (uint16_t)(sizeof("[shardbench-link] " SBL_BUILD_MARKER) - 1));
 
-    uint32_t next_report = port_tick_ms(nullptr) + 5000;
+#if SBL_LINK_STATS
+    uint32_t next_report = port_tick_ms(nullptr) + SBL_LINK_STATS;
+#endif
 
     while (_running) {
-        /* A count of what has been asked and how long the slowest answer took, from
-           inside. The host cannot tell a slow board from a slow line; this can. */
+#if SBL_LINK_STATS
+        /* A count of what has been asked and how long the slowest answer took, seen
+           from inside. The host cannot tell a slow board from a slow line; this can,
+           and it is what proved the board innocent when a USB bridge was delaying
+           replies by a second. Off by default: it is noise on a working bench. */
         if ((int32_t)(port_tick_ms(nullptr) - next_report) >= 0) {
             char note[64];
             int n = snprintf(note, sizeof(note), "[link] rx=%lu tx=%lu slowest=%lums",
@@ -197,8 +202,9 @@ void Link::rx_thread()
                 sbl_log(&_ctx, SBL_LOG_INFO, note, (uint16_t)n);
             }
             _ctx.slowest_ms = 0;
-            next_report += 5000;
+            next_report += SBL_LINK_STATS;
         }
+#endif
 
         ssize_t n = _serial.read(chunk, sizeof(chunk));
         if (n > 0) {
