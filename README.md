@@ -52,7 +52,7 @@ The BMU build already takes several source folders, so the library joins them:
 
 ```sh
 mbed compile -t GCC_ARM -m NUCLEO_L486RG \
-    --source=. --source=../app_src --source=../common \
+    --source=. --source=../src --source=../common \
     --source=../libs/vitroio-sdk --source=../libs/shardbench-link
 ```
 
@@ -75,3 +75,9 @@ What is *not* promised: bytes appended to a frame with no delimiter between them
 malformed block, and that frame goes with the junk.
 
 Full protocol: `docs/architecture.md`, section 5.
+
+## Putting it in a firmware
+
+`INTEGRATING.md` is the step-by-step: the port, resource handlers, long commands,
+streams, the console bridge, and the bring-up flags that find a problem in minutes
+rather than in an afternoon.
