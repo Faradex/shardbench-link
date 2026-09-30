@@ -41,6 +41,33 @@ void ConsoleToLog::on_line(uint8_t level, const char *text, uint16_t len, void *
     sbl_log(static_cast<sbl_ctx *>(user), level, text, len);
 }
 
+#if SBL_CONSOLE_TRACE
+/**
+ * Report every write stdout hands over, before anything is done with it.
+ *
+ * Temporary, and deliberately crude: it answers one question -- what does printf
+ * actually deliver, and in what pieces -- which no amount of reasoning about newlib
+ * has managed to settle.
+ */
+void ConsoleToLog::trace(const char *data, size_t size)
+{
+    static const char HEX[] = "0123456789abcdef";
+    char out[96];
+    size_t n = 0;
+    size_t i;
+
+    out[n++] = 'w';
+    out[n++] = HEX[(size >> 4) & 0xF];
+    out[n++] = HEX[size & 0xF];
+    out[n++] = ':';
+    for (i = 0; i < size && n + 2 < sizeof(out); i++) {
+        out[n++] = HEX[((unsigned char)data[i] >> 4) & 0xF];
+        out[n++] = HEX[(unsigned char)data[i] & 0xF];
+    }
+    sbl_log(_ctx, SBL_LOG_INFO, out, (uint16_t)n);
+}
+#endif
+
 ssize_t ConsoleToLog::write(const void *buffer, size_t size)
 {
     /* Before the link exists, and from an interrupt, straight to the port. Mbed's
@@ -48,6 +75,10 @@ ssize_t ConsoleToLog::write(const void *buffer, size_t size)
     if (_ctx == nullptr || core_util_is_isr_active()) {
         return _serial.write(buffer, size);
     }
+
+#if SBL_CONSOLE_TRACE
+    trace(static_cast<const char *>(buffer), size);
+#endif
 
     _lock.lock();
     /* The thread id is what tells one printf from another: they interleave, because

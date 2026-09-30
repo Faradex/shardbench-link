@@ -58,7 +58,15 @@
 
 /** Bumped whenever the library changes in a way worth telling a board apart by. */
 #ifndef SBL_BUILD_MARKER
-#define SBL_BUILD_MARKER "line-buffered stdout, build 5"
+#define SBL_BUILD_MARKER "trace build 6"
+#endif
+
+/**
+ * Report every write stdout makes, as a log line, before anything is done with it.
+ * For bring-up only: it roughly doubles the traffic on the line.
+ */
+#ifndef SBL_CONSOLE_TRACE
+#define SBL_CONSOLE_TRACE 0
 #endif
 
 #endif /* SBL_CONFIG_H */

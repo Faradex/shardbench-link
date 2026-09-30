@@ -43,6 +43,9 @@ public:
 private:
     /** Where a finished line goes. Static so the C core can call back into it. */
     static void on_line(uint8_t level, const char *text, uint16_t len, void *user);
+#if SBL_CONSOLE_TRACE
+    void trace(const char *data, size_t size);
+#endif
 
     mbed::BufferedSerial &_serial;
     sbl_ctx    *_ctx;
