@@ -2,17 +2,33 @@
  * Mbed OS port of ShardBench Link.
  *
  * Everything that knows about a UART, a thread or a mutex is here; `src/` stays plain
- * C99 so it can be tested on a PC. A different transport -- CAN, or a socket -- is
- * another file beside this one rather than a change to anything above it.
+ * C99 so it can be tested on a PC.
+ *
+ * A second way in, beside the UART: the CAN tunnel through a Crystal (`sbl_tunnel.h`).
+ * The firmware supplies a `CanBus` -- "send this frame" -- and hands over what arrives
+ * on 0x7A0 for its node; the link does the rest, with one set of resources for both.
  */
 #ifndef SBL_PORT_MBED_H
 #define SBL_PORT_MBED_H
 
 #include <mbed.h>
 
+#include "sbl_tunnel.h"
 #include "shardbench_link.h"
 
 namespace sbl {
+
+/**
+ * What the link needs of a CAN driver, and nothing more: the library stays free of any
+ * SDK. The firmware's adapter builds the extended id from its own node id.
+ */
+class CanBus {
+public:
+    virtual ~CanBus() {}
+    /** Send one frame on `param` from this node. False when the controller has no
+        room right now: the link waits a little and tries again. */
+    virtual bool send(uint16_t param, const uint8_t *data, uint8_t len) = 0;
+};
 
 /**
  * Turns everything written to stdout into LOG frames.
@@ -34,6 +50,14 @@ public:
     /** Called once the link is running; before this, output is passed through raw. */
     void attach(sbl_ctx *ctx);
 
+    /**
+     * Pass one thread's output straight to the UART, as text, while it is set: the
+     * thread sending a CAN frame, whose driver may print an error. Through the link it
+     * would need the console's lock while holding the transmit lock -- which another
+     * printing thread may hold the other way round.
+     */
+    void raw_for(osThreadId_t thread) { _raw_thread = thread; }
+
     ssize_t write(const void *buffer, size_t size) override;
     ssize_t read(void *buffer, size_t size) override;
     off_t seek(off_t offset, int whence = SEEK_SET) override;
@@ -50,6 +74,7 @@ private:
     mbed::BufferedSerial &_serial;
     sbl_ctx    *_ctx;
     rtos::Mutex _lock;
+    volatile osThreadId_t _raw_thread = nullptr;
     /* The line assembly itself lives in the platform-free half, under test: it is the
        part that got the interleaving wrong twice, and here it cannot be tested. */
     sbl_console _console;
@@ -85,6 +110,16 @@ public:
     sbl_ctx *ctx() { return &_ctx; }
     ConsoleToLog &console() { return _console; }
 
+    /** Give the link the Crystal's CAN tunnel as a second way in (D-7). Before start(). */
+    void attach_can(CanBus &bus);
+
+    /**
+     * The data of a frame on 0x7A0 addressed to this node. From any thread -- the CAN
+     * driver's event queue, typically -- but not from an interrupt. The bytes are
+     * handled on the link's own thread, like the UART's.
+     */
+    void can_received(const uint8_t *data, uint8_t len);
+
     /** Convenience wrappers; the C API underneath takes ctx() directly. */
     void add(uint16_t id, uint8_t kinds, sbl_handler_fn fn, void *user = nullptr);
     void emit(uint16_t id, const void *payload, uint16_t len);
@@ -99,7 +134,13 @@ public:
     const sbl_stream_cfg *stream_config(uint16_t id) const;
 
 private:
+    enum Channel { UART, CAN };
+
     void rx_thread();
+    void on_serial_event();
+    void feed(Channel from, const uint8_t *data, size_t len);
+    bool can_attached();
+    void can_write(const uint8_t *data, size_t len);
 
     static void port_write(void *io, const uint8_t *data, size_t len);
     static void port_lock(void *io);
@@ -113,6 +154,17 @@ private:
     sbl_port       _port;
     sbl_ctx        _ctx;
     volatile bool  _running;
+
+    /* The CAN tunnel. `_channel` is where the last request came from, and where
+       answers, events and LOG frames go while the host there is still listening. */
+    CanBus        *_can;
+    sbl_tunnel     _tunnel;
+    volatile Channel _channel;
+    rtos::Mutex    _rx_lock;             /* sbl_feed is not re-entrant */
+    rtos::Mutex    _tunnel_lock;
+    mbed::CircularBuffer<uint8_t, 512> _can_rx;
+    rtos::EventFlags _wake;
+    bool           _in_can_write;
 };
 
 }  // namespace sbl

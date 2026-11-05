@@ -22,6 +22,13 @@ namespace sbl {
 static const size_t RX_CHUNK = 128;
 /** Enough for the link's own work; the application's handlers run on this stack too. */
 static const uint32_t RX_STACK = 2048;
+/** The flag that wakes the link thread: the UART has bytes, or the CAN tunnel has. */
+static const uint32_t WAKE = 1u;
+/** CAN frames sent back to back before letting the controller's three mailboxes drain. */
+static const unsigned CAN_BURST = 3;
+/** How long one CAN frame may wait for a mailbox before the rest of the write is dropped:
+    the host's timeout and retry recover a frame cut short. */
+static const unsigned CAN_SEND_TRIES = 100;
 
 // --- the console ------------------------------------------------------------
 
@@ -75,7 +82,7 @@ ssize_t ConsoleToLog::write(const void *buffer, size_t size)
 {
     /* Before the link exists, and from an interrupt, straight to the port. Mbed's
        error handler prints the crash through here, and it must survive. */
-    if (_ctx == nullptr || core_util_is_isr_active()) {
+    if (_ctx == nullptr || core_util_is_isr_active() || osThreadGetId() == _raw_thread) {
         return _serial.write(buffer, size);
     }
 
@@ -119,7 +126,17 @@ int ConsoleToLog::isatty()
 
 void Link::port_write(void *io, const uint8_t *data, size_t len)
 {
-    static_cast<Link *>(io)->_serial.write(data, len);
+    Link *self = static_cast<Link *>(io);
+    /* `_in_can_write`: the CAN driver printing an error while a frame goes out comes
+       back here, as a LOG frame. Sent on CAN it would recurse; it goes to the UART. */
+    if (self->_can != nullptr && self->_channel == CAN && !self->_in_can_write) {
+        if (self->can_attached()) {
+            self->can_write(data, len);
+            return;
+        }
+        self->_channel = UART;           /* the host on the tunnel stopped listening */
+    }
+    self->_serial.write(data, len);
 }
 
 void Link::port_lock(void *io)
@@ -141,8 +158,9 @@ uint32_t Link::port_tick_ms(void *)
 
 Link::Link(mbed::BufferedSerial &serial, const sbl_device_info &info)
     : _serial(serial), _console(serial), _thread(osPriorityAboveNormal, RX_STACK),
-      _running(false)
+      _running(false), _can(nullptr), _channel(UART), _in_can_write(false)
 {
+    sbl_tunnel_init(&_tunnel);
     _port.write = &Link::port_write;
     _port.lock = &Link::port_lock;
     _port.unlock = &Link::port_unlock;
@@ -172,9 +190,99 @@ void Link::start(osPriority priority)
        every session has been disappearing. */
 }
 
+// --- the CAN tunnel (D-7) ----------------------------------------------------
+
+void Link::attach_can(CanBus &bus)
+{
+    _can = &bus;
+}
+
+void Link::can_received(const uint8_t *data, uint8_t len)
+{
+    uint8_t bytes[SBL_TUNNEL_FRAME_MAX];
+    _tunnel_lock.lock();
+    size_t n = sbl_tunnel_receive(&_tunnel, data, len, port_tick_ms(nullptr), bytes);
+    _tunnel_lock.unlock();
+    for (size_t i = 0; i < n; i++) {
+        /* Full means the link thread has fallen behind by half a kilobyte; what is lost
+           is a frame the host will ask for again. */
+        if (_can_rx.full()) {
+            break;
+        }
+        _can_rx.push(bytes[i]);
+    }
+    /* A keepalive carries no bytes but still matters: it keeps the node attached. */
+    if (n > 0) {
+        _wake.set(WAKE);
+    }
+}
+
+bool Link::can_attached()
+{
+    _tunnel_lock.lock();
+    bool attached = sbl_tunnel_attached(&_tunnel, port_tick_ms(nullptr)) != 0;
+    _tunnel_lock.unlock();
+    return attached;
+}
+
+void Link::can_write(const uint8_t *data, size_t len)
+{
+    uint8_t frame[SBL_TUNNEL_FRAME_MAX];
+    size_t used;
+    unsigned burst = 0;
+
+    _in_can_write = true;
+    _console.raw_for(osThreadGetId());
+    while (len > 0) {
+        _tunnel_lock.lock();
+        size_t n = sbl_tunnel_next_frame(&_tunnel, data, len, frame, &used);
+        _tunnel_lock.unlock();
+        unsigned tries = 0;
+        while (!_can->send(SBL_TUNNEL_TO_HOST, frame, static_cast<uint8_t>(n))) {
+            if (++tries >= CAN_SEND_TRIES) {
+                len = 0;                 /* the bus is not taking frames: give up */
+                break;
+            }
+            rtos::ThisThread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (len == 0) {
+            break;
+        }
+        data += used;
+        len -= used;
+        if (++burst >= CAN_BURST) {
+            burst = 0;
+            rtos::ThisThread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    _console.raw_for(nullptr);
+    _in_can_write = false;
+}
+
+void Link::on_serial_event()
+{
+    _wake.set(WAKE);                     /* from an interrupt: EventFlags allow it */
+}
+
+void Link::feed(Channel from, const uint8_t *data, size_t len)
+{
+    _rx_lock.lock();
+    if (from != _channel) {
+        /* Half a frame from one channel must never be completed by bytes from the
+           other: a lone 0x00 makes the decoder drop whatever it was holding. */
+        static const uint8_t delimiter = 0x00;
+        sbl_feed(&_ctx, &delimiter, 1);
+        _channel = from;
+    }
+    sbl_feed(&_ctx, data, len);
+    _rx_lock.unlock();
+}
+
 void Link::rx_thread()
 {
     uint8_t chunk[RX_CHUNK];
+
+    _serial.sigio(mbed::callback(this, &Link::on_serial_event));
 
     /* Past the reset transient, and sent with sbl_log directly rather than through the
        console: if this arrives while ordinary log lines are still damaged, the fault is
@@ -206,10 +314,26 @@ void Link::rx_thread()
         }
 #endif
 
+        /* Both ways in, from one thread: handlers run here, on this stack, whichever
+           channel the request came by -- so they must not block for long. */
+        bool worked = false;
+        size_t m = 0;
+        while (m < sizeof(chunk) && _can_rx.pop(chunk[m])) {
+            m++;
+        }
+        if (m > 0) {
+            feed(CAN, chunk, m);
+            worked = true;
+        }
+        if (!_serial.readable()) {
+            if (!worked) {
+                _wake.wait_any_for(WAKE, std::chrono::milliseconds(50));
+            }
+            continue;
+        }
         ssize_t n = _serial.read(chunk, sizeof(chunk));
         if (n > 0) {
-            /* Handlers run here, on this stack, so they must not block for long. */
-            sbl_feed(&_ctx, chunk, static_cast<size_t>(n));
+            feed(UART, chunk, static_cast<size_t>(n));
         } else if (n < 0) {
             /* A read error on a UART is not something a device can fix. Pause rather
                than spin, and carry on: the line may come back when a cable does. */

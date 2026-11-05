@@ -458,7 +458,36 @@ against the *host's* decoder, never against your own input.
 
 ---
 
-## 11. Checklist
+## 11. Through a Crystal: the CAN tunnel
+
+A node on a Crystal's CAN bus is reached through the same link: the Crystal's service
+cuts the byte stream into CAN frames, `sbl_tunnel.h` does the same on the node, and one
+set of resources answers both ways in (ShardBench `docs/architecture.md` 7.1).
+
+```cpp
+class LinkCan : public sbl::CanBus {        // the firmware's adapter to its CAN driver
+    bool send(uint16_t param, const uint8_t *data, uint8_t len) override {
+        // build (own node id << 11) | param, extended; false if no mailbox is free
+    }
+};
+
+shardbench.attach_can(link_can);            // before start()
+// from the CAN driver's receive callback, for param 0x7A0 and this node's id only:
+shardbench.can_received(frame_data, frame_len);
+```
+
+- The link answers on the channel the last request came by, and switches cleanly.
+- It sends on 0x7A1 only while the host has been heard within 3 s: the Crystal sends a
+  keepalive every second while a node is attached. Unwatched, a node is silent on the bus.
+- `can_received` is for a thread, not an interrupt; the bytes are handled on the link's
+  thread, like the UART's.
+- While a CAN frame goes out, that thread's own `printf` goes to the UART as raw text: a
+  driver that prints an error from inside `send` would otherwise deadlock against
+  another thread printing at the same moment.
+
+---
+
+## 12. Checklist
 
 - [ ] port: `write` sends everything; `lock`/`unlock` real if two contexts can send
 - [ ] `sbl_device_info` outlives the context
@@ -472,3 +501,4 @@ against the *host's* decoder, never against your own input.
 - [ ] `setvbuf(stdout, NULL, _IONBF, 0)` if anything shares stdout
 - [ ] raw-text fallback before the link starts and during a crash
 - [ ] cross-checks against the host decoder for anything new on the wire
+- [ ] CAN tunnel: `attach_can` before `start`, `can_received` filtered on 0x7A0 and own id
