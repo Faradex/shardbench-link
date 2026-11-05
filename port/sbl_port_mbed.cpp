@@ -34,9 +34,12 @@ static const uint32_t CAN_TX_STACK = 4096;
 static const size_t CAN_TX_CAPACITY = 1024;
 /** CAN frames sent back to back before letting the controller's three mailboxes drain. */
 static const unsigned CAN_BURST = 3;
-/** How long one CAN frame may wait for a mailbox before the rest of the write is dropped:
-    the host's timeout and retry recover a frame cut short. */
-static const unsigned CAN_SEND_TRIES = 100;
+/** How often, and how many times, a CAN frame is offered again when the driver has no
+    room: 100 us apart, 20 ms in all, then it is dropped and the host's retry recovers.
+    Short, because an adapter that keeps one frame in the controller at a time (to keep
+    them in order) says "no room" for every frame still on the wire. */
+static const unsigned CAN_SEND_RETRY_US = 100;
+static const unsigned CAN_SEND_TRIES = 200;
 
 // --- the console ------------------------------------------------------------
 
@@ -276,7 +279,7 @@ void Link::can_tx_thread()
             if (++tries >= CAN_SEND_TRIES) {
                 break;                   /* lost: the host's retry recovers it */
             }
-            rtos::ThisThread::sleep_for(std::chrono::milliseconds(1));
+            wait_us(CAN_SEND_RETRY_US);
         }
         if (++burst >= CAN_BURST) {
             burst = 0;

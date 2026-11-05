@@ -26,7 +26,12 @@ class CanBus {
 public:
     virtual ~CanBus() {}
     /** Send one frame on `param` from this node. False when the controller has no
-        room right now: the link waits a little and tries again. */
+        room right now: the link waits a little and tries again.
+
+        The frames must reach the bus in the order they are sent. A controller with
+        several transmit mailboxes may not keep that order on its own: bxCAN sends the
+        lowest-numbered pending mailbox first, and the tunnel's frames, all on one id,
+        came out swapped. Keep one frame in the controller at a time. */
     virtual bool send(uint16_t param, const uint8_t *data, uint8_t len) = 0;
 };
 

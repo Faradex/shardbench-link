@@ -481,6 +481,8 @@ shardbench.can_received(frame_data, frame_len);
   keepalive every second while a node is attached. Unwatched, a node is silent on the bus.
 - `can_received` is for a thread, not an interrupt; the bytes are handled on the link's
   thread, like the UART's.
+- `send` must keep the frames in order. bxCAN does not, with more than one transmit
+  mailbox pending: refuse a frame (return false) until the previous one has left.
 - What goes out on CAN is queued, and a thread of the link's own, above normal
   priority, sends it -- as a UART's bytes wait for its interrupt. Writing never waits
   for the bus: a low-priority measurement thread completing a command would otherwise
