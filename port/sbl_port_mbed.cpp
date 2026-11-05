@@ -26,8 +26,11 @@ static const uint32_t RX_STACK = 2048;
 static const uint32_t WAKE = 1u;
 /** The flag that wakes the CAN sending thread: there is something to send. */
 static const uint32_t CAN_TX = 2u;
-/** The CAN sending thread: its own stack, for the driver and a raw-text error line. */
-static const uint32_t CAN_TX_STACK = 1536;
+/** The CAN sending thread's stack. Not small: the SDK's CAN driver prints an error with
+    printf when no mailbox is free, and newlib's printf is deep. At 1.5 kB that overflowed
+    and corrupted the heap beside it -- the board reset a moment after each answer, and
+    the UART repeated one log line for ever (bench, 2026-11-05). Mbed's own default. */
+static const uint32_t CAN_TX_STACK = 4096;
 static const size_t CAN_TX_CAPACITY = 1024;
 /** CAN frames sent back to back before letting the controller's three mailboxes drain. */
 static const unsigned CAN_BURST = 3;
