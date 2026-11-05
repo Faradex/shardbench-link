@@ -24,6 +24,11 @@ static const size_t RX_CHUNK = 128;
 static const uint32_t RX_STACK = 2048;
 /** The flag that wakes the link thread: the UART has bytes, or the CAN tunnel has. */
 static const uint32_t WAKE = 1u;
+/** The flag that wakes the CAN sending thread: there is something to send. */
+static const uint32_t CAN_TX = 2u;
+/** The CAN sending thread: its own stack, for the driver and a raw-text error line. */
+static const uint32_t CAN_TX_STACK = 1536;
+static const size_t CAN_TX_CAPACITY = 1024;
 /** CAN frames sent back to back before letting the controller's three mailboxes drain. */
 static const unsigned CAN_BURST = 3;
 /** How long one CAN frame may wait for a mailbox before the rest of the write is dropped:
@@ -127,11 +132,18 @@ int ConsoleToLog::isatty()
 void Link::port_write(void *io, const uint8_t *data, size_t len)
 {
     Link *self = static_cast<Link *>(io);
-    /* `_in_can_write`: the CAN driver printing an error while a frame goes out comes
-       back here, as a LOG frame. Sent on CAN it would recurse; it goes to the UART. */
-    if (self->_can != nullptr && self->_channel == CAN && !self->_in_can_write) {
+    if (self->_can != nullptr && self->_channel == CAN) {
         if (self->can_attached()) {
-            self->can_write(data, len);
+            /* Called under the link's transmit lock, so one frame's bytes are queued
+               together. A frame that does not fit is dropped whole -- a cut one would
+               only be dropped by the host's decoder -- and the host's retry recovers. */
+            if (CAN_TX_CAPACITY - self->_can_tx.size() < len) {
+                return;
+            }
+            for (size_t i = 0; i < len; i++) {
+                self->_can_tx.push(data[i]);
+            }
+            self->_wake.set(CAN_TX);
             return;
         }
         self->_channel = UART;           /* the host on the tunnel stopped listening */
@@ -158,7 +170,8 @@ uint32_t Link::port_tick_ms(void *)
 
 Link::Link(mbed::BufferedSerial &serial, const sbl_device_info &info)
     : _serial(serial), _console(serial), _thread(osPriorityAboveNormal, RX_STACK),
-      _running(false), _can(nullptr), _channel(UART), _in_can_write(false)
+      _running(false), _can(nullptr), _channel(UART),
+      _can_thread(osPriorityAboveNormal, CAN_TX_STACK)
 {
     sbl_tunnel_init(&_tunnel);
     _port.write = &Link::port_write;
@@ -177,6 +190,9 @@ void Link::start(osPriority priority)
     _running = true;
     _thread.set_priority(priority);
     _thread.start(mbed::callback(this, &Link::rx_thread));
+    if (_can != nullptr) {
+        _can_thread.start(mbed::callback(this, &Link::can_tx_thread));
+    }
     /* Only now: a log frame sent before the thread exists would still go out, but the
        host would have nothing listening for a board it has not probed yet. */
     _console.attach(&_ctx);
@@ -225,38 +241,45 @@ bool Link::can_attached()
     return attached;
 }
 
-void Link::can_write(const uint8_t *data, size_t len)
+void Link::can_tx_thread()
 {
+    uint8_t chunk[SBL_TUNNEL_CHUNK];
     uint8_t frame[SBL_TUNNEL_FRAME_MAX];
-    size_t used;
     unsigned burst = 0;
 
-    _in_can_write = true;
+    /* This thread's own output -- the CAN driver printing an error from inside send()
+       -- goes to the UART as raw text: through the link it would come back here. */
     _console.raw_for(osThreadGetId());
-    while (len > 0) {
+    while (_running) {
+        if (_can_tx.empty()) {
+            burst = 0;
+            _wake.wait_any_for(CAN_TX, std::chrono::milliseconds(100));
+            continue;
+        }
+        if (!can_attached()) {
+            _can_tx.reset();             /* nobody is listening any more */
+            continue;
+        }
+        size_t n = 0;
+        while (n < sizeof(chunk) && _can_tx.pop(chunk[n])) {
+            n++;
+        }
+        size_t used;
         _tunnel_lock.lock();
-        size_t n = sbl_tunnel_next_frame(&_tunnel, data, len, frame, &used);
+        size_t len = sbl_tunnel_next_frame(&_tunnel, chunk, n, frame, &used);
         _tunnel_lock.unlock();
         unsigned tries = 0;
-        while (!_can->send(SBL_TUNNEL_TO_HOST, frame, static_cast<uint8_t>(n))) {
+        while (!_can->send(SBL_TUNNEL_TO_HOST, frame, static_cast<uint8_t>(len))) {
             if (++tries >= CAN_SEND_TRIES) {
-                len = 0;                 /* the bus is not taking frames: give up */
-                break;
+                break;                   /* lost: the host's retry recovers it */
             }
             rtos::ThisThread::sleep_for(std::chrono::milliseconds(1));
         }
-        if (len == 0) {
-            break;
-        }
-        data += used;
-        len -= used;
         if (++burst >= CAN_BURST) {
             burst = 0;
             rtos::ThisThread::sleep_for(std::chrono::milliseconds(1));
         }
     }
-    _console.raw_for(nullptr);
-    _in_can_write = false;
 }
 
 void Link::on_serial_event()

@@ -140,7 +140,7 @@ private:
     void on_serial_event();
     void feed(Channel from, const uint8_t *data, size_t len);
     bool can_attached();
-    void can_write(const uint8_t *data, size_t len);
+    void can_tx_thread();
 
     static void port_write(void *io, const uint8_t *data, size_t len);
     static void port_lock(void *io);
@@ -163,8 +163,12 @@ private:
     rtos::Mutex    _rx_lock;             /* sbl_feed is not re-entrant */
     rtos::Mutex    _tunnel_lock;
     mbed::CircularBuffer<uint8_t, 512> _can_rx;
+    /* What goes out on CAN waits here for its own thread, as UART bytes wait in the
+       BufferedSerial for its interrupt: the thread that writes -- often a measurement
+       thread of low priority -- returns at once instead of being starved mid-frame. */
+    mbed::CircularBuffer<uint8_t, 1024> _can_tx;
+    rtos::Thread   _can_thread;
     rtos::EventFlags _wake;
-    bool           _in_can_write;
 };
 
 }  // namespace sbl

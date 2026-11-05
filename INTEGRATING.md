@@ -481,9 +481,13 @@ shardbench.can_received(frame_data, frame_len);
   keepalive every second while a node is attached. Unwatched, a node is silent on the bus.
 - `can_received` is for a thread, not an interrupt; the bytes are handled on the link's
   thread, like the UART's.
-- While a CAN frame goes out, that thread's own `printf` goes to the UART as raw text: a
-  driver that prints an error from inside `send` would otherwise deadlock against
-  another thread printing at the same moment.
+- What goes out on CAN is queued, and a thread of the link's own, above normal
+  priority, sends it -- as a UART's bytes wait for its interrupt. Writing never waits
+  for the bus: a low-priority measurement thread completing a command would otherwise
+  be starved between two frames, and its answer arrive after the host gave up. A frame
+  that does not fit the queue is dropped whole; the host retries.
+- That thread's own `printf` -- a CAN driver reporting an error from inside `send` --
+  goes to the UART as raw text: through the link it would come straight back to it.
 
 ---
 
