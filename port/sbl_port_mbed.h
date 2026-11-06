@@ -146,6 +146,7 @@ private:
     void feed(Channel from, const uint8_t *data, size_t len);
     bool can_attached();
     void can_tx_thread();
+    void send_presence(uint8_t *frame);
 
     static void port_write(void *io, const uint8_t *data, size_t len);
     static void port_lock(void *io);

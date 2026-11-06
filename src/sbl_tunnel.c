@@ -58,3 +58,21 @@ size_t sbl_tunnel_next_frame(sbl_tunnel *t, const uint8_t *data, size_t len,
     t->tx_seq = (uint8_t)((t->tx_seq + 1u) & SEQ_MASK);
     return take + 1;
 }
+
+size_t sbl_tunnel_presence(const sbl_tunnel *t, uint32_t now_ms, uint8_t *frame)
+{
+    if (sbl_tunnel_attached(t, now_ms)) {
+        return 0;                    /* the host is listening: it has the stream */
+    }
+    if (t->presence_sent && (uint32_t)(now_ms - t->presence_ms) < SBL_TUNNEL_PRESENCE_MS) {
+        return 0;
+    }
+    frame[0] = t->tx_seq;            /* a keepalive: the sequence does not move */
+    return 1;
+}
+
+void sbl_tunnel_presence_sent(sbl_tunnel *t, uint32_t now_ms)
+{
+    t->presence_sent = 1;
+    t->presence_ms = now_ms;
+}

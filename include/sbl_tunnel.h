@@ -11,7 +11,9 @@
  * - an unexpected sequence means a lost frame: a 0x00 goes to the decoder first, which
  *   drops the link frame in progress -- the host's retry recovers it;
  * - a node is attached while it has heard on 0x7A0 within SBL_TUNNEL_ATTACHED_MS, and
- *   sends on 0x7A1 only then.
+ *   sends its stream on 0x7A1 only then;
+ * - not attached, it sends a keepalive on 0x7A1 every SBL_TUNNEL_PRESENCE_MS, so that the
+ *   Crystal can tell a board that is there from one unplugged.
  */
 #ifndef SBL_TUNNEL_H
 #define SBL_TUNNEL_H
@@ -28,6 +30,7 @@ extern "C" {
 #define SBL_TUNNEL_CHUNK        7u
 #define SBL_TUNNEL_FRAME_MAX    8u
 #define SBL_TUNNEL_ATTACHED_MS  3000u
+#define SBL_TUNNEL_PRESENCE_MS  5000u
 
 typedef struct {
     uint8_t  tx_seq;
@@ -36,6 +39,8 @@ typedef struct {
     uint8_t  heard;          /* 0 until anything has arrived */
     uint32_t last_rx_ms;
     uint32_t gaps;           /* lost frames noticed, for a stats line */
+    uint32_t presence_ms;    /* when the last presence keepalive left */
+    uint8_t  presence_sent;  /* 0 until one has: the first is due at once */
 } sbl_tunnel;
 
 void sbl_tunnel_init(sbl_tunnel *t);
@@ -58,6 +63,16 @@ int sbl_tunnel_attached(const sbl_tunnel *t, uint32_t now_ms);
  */
 size_t sbl_tunnel_next_frame(sbl_tunnel *t, const uint8_t *data, size_t len,
                              uint8_t *frame, size_t *used);
+
+/**
+ * The presence keepalive, when one is due: not attached, and none sent for
+ * SBL_TUNNEL_PRESENCE_MS. Writes it to `frame` and returns its length, 1; returns 0 when
+ * none is due. It stays due until sbl_tunnel_presence_sent() says it left -- a node that
+ * may not transmit yet (no node id from the Crystal) simply tries again later.
+ */
+size_t sbl_tunnel_presence(const sbl_tunnel *t, uint32_t now_ms, uint8_t *frame);
+
+void sbl_tunnel_presence_sent(sbl_tunnel *t, uint32_t now_ms);
 
 #ifdef __cplusplus
 }

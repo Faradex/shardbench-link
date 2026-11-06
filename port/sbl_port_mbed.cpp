@@ -259,6 +259,7 @@ void Link::can_tx_thread()
     while (_running) {
         if (_can_tx.empty()) {
             burst = 0;
+            send_presence(frame);
             _wake.wait_any_for(CAN_TX, std::chrono::milliseconds(100));
             continue;
         }
@@ -285,6 +286,22 @@ void Link::can_tx_thread()
             burst = 0;
             rtos::ThisThread::sleep_for(std::chrono::milliseconds(1));
         }
+    }
+}
+
+void Link::send_presence(uint8_t *frame)
+{
+    /* Nobody attached: now and then, a keepalive that says the board is there. One try:
+       refused -- no node id from the Crystal yet, the controller busy -- it is offered
+       again on the next round, a tenth of a second later. */
+    uint32_t now = port_tick_ms(nullptr);
+    _tunnel_lock.lock();
+    size_t len = sbl_tunnel_presence(&_tunnel, now, frame);
+    _tunnel_lock.unlock();
+    if (len != 0 && _can->send(SBL_TUNNEL_TO_HOST, frame, static_cast<uint8_t>(len))) {
+        _tunnel_lock.lock();
+        sbl_tunnel_presence_sent(&_tunnel, now);
+        _tunnel_lock.unlock();
     }
 }
 

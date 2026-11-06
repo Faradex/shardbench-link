@@ -477,8 +477,13 @@ shardbench.can_received(frame_data, frame_len);
 ```
 
 - The link answers on the channel the last request came by, and switches cleanly.
-- It sends on 0x7A1 only while the host has been heard within 3 s: the Crystal sends a
-  keepalive every second while a node is attached. Unwatched, a node is silent on the bus.
+- It sends its stream on 0x7A1 only while the host has been heard within 3 s: the
+  Crystal sends a keepalive every second while a node is attached.
+- Unwatched, it sends a keepalive of its own on 0x7A1 every 5 s, so that the Crystal can
+  tell a board that is there from one unplugged. `send` must refuse it (return false)
+  while the node has no node id from the Crystal yet: sent from the provisional id the
+  SDK starts with, it would show up as a node that does not exist. Refused, it is offered
+  again a tenth of a second later.
 - `can_received` is for a thread, not an interrupt; the bytes are handled on the link's
   thread, like the UART's.
 - `send` must keep the frames in order. bxCAN does not, with more than one transmit
@@ -507,4 +512,5 @@ shardbench.can_received(frame_data, frame_len);
 - [ ] `setvbuf(stdout, NULL, _IONBF, 0)` if anything shares stdout
 - [ ] raw-text fallback before the link starts and during a crash
 - [ ] cross-checks against the host decoder for anything new on the wire
-- [ ] CAN tunnel: `attach_can` before `start`, `can_received` filtered on 0x7A0 and own id
+- [ ] CAN tunnel: `attach_can` before `start`, `can_received` filtered on 0x7A0 and own id,
+      `send` refuses until the node has its node id
