@@ -65,8 +65,19 @@ typedef enum {
     SBL_ID_STATUS     = 0x0004,
     SBL_ID_RESET      = 0x0005,
     SBL_ID_STREAM_CFG = 0x0006,
-    SBL_ID_LOG_LEVEL  = 0x0007
+    SBL_ID_LOG_LEVEL  = 0x0007,
+    /**
+     * CALL, optional u16 seconds: make the board findable in a rack. It answers at once
+     * with the u16 seconds it will blink for. No payload means the default; 0 stops.
+     * Answered only when the platform has hooked it (sbl_on_identify), UNKNOWN_ID
+     * otherwise: a board with no LEDs to blink says so rather than pretending.
+     */
+    SBL_ID_IDENTIFY   = 0x0008
 } sbl_core_id;
+
+/** How long IDENTIFY blinks when the host does not say, and the most it will. */
+#define SBL_IDENTIFY_DEFAULT_S 30u
+#define SBL_IDENTIFY_MAX_S     600u
 
 /** Negative values are failures; zero and above are byte counts or success. */
 typedef enum {
@@ -215,6 +226,12 @@ typedef struct {
     uint16_t decimation;
 } sbl_stream_cfg;
 
+/**
+ * Blink for `seconds`, or stop when it is 0. Called on the link's thread, inside the
+ * request: start something and return, never blink here.
+ */
+typedef void (*sbl_identify_fn)(uint16_t seconds, void *user);
+
 typedef struct {
     const sbl_port        *port;
     const sbl_device_info *info;
@@ -233,12 +250,17 @@ typedef struct {
     uint32_t               dropped;               /**< frames that would not encode */
     uint32_t               received;              /**< requests dispatched */
     uint32_t               slowest_ms;            /**< longest a request took to answer */
+    sbl_identify_fn        identify;              /**< NULL: IDENTIFY is unknown here */
+    void                  *identify_user;
 } sbl_ctx;
 
 /** Default log level: 0 off, 1 error, 2 warn, 3 info, 4 debug. */
 #define SBL_LOG_INFO 3
 
 void sbl_init(sbl_ctx *ctx, const sbl_port *port, const sbl_device_info *info);
+
+/** What IDENTIFY does on this board. The Mbed port's sbl::Identify calls this. */
+void sbl_on_identify(sbl_ctx *ctx, sbl_identify_fn fn, void *user);
 
 /** Register a resource. Returns 0, or SBL_E_TOO_BIG when the table is full. */
 int sbl_add(sbl_ctx *ctx, uint16_t id, uint8_t kinds, sbl_handler_fn fn, void *user);

@@ -129,7 +129,7 @@ where it stopped.
 
 A resource is one thing the board exposes, identified by a 16-bit id. Core ids `0x0001`
 to `0x00FF` belong to the protocol (PING, INFO, TIME, STATUS, RESET, STREAM_CFG,
-LOG_LEVEL) and are answered inside the library. **Yours start at `0x0100`.**
+LOG_LEVEL, IDENTIFY) and are answered inside the library. **Yours start at `0x0100`.**
 
 ```c
 sbl_add(&ctx, id, kinds, handler, user);
@@ -496,9 +496,33 @@ shardbench.can_received(frame_data, frame_len);
 - That thread's own `printf` -- a CAN driver reporting an error from inside `send` --
   goes to the UART as raw text: through the link it would come straight back to it.
 
+## 12. Identify
+
+IDENTIFY (`0x0008`) makes a board findable in a rack of identical ones: ShardBench asks,
+the two status LEDs alternate four times a second for 30 s, and the operator walks to the
+one that blinks. That is how boards are placed into an installation's slots, so a board
+that is going to be installed should answer it.
+
+The library answers the request; the board says what blinking means. On Mbed, two lines:
+
+```cpp
+static sbl::Identify identify;              // yellow PA_5, green PC_11: the Shard V2 socket
+identify.attach(shardbench);                // before or after start()
+```
+
+- Nothing blocks: a Ticker swaps the LEDs, and the request is answered at once with the
+  seconds it will blink for (default 30, at most 600; 0 stops).
+- Each LED goes back to the level it had before. The pins are only taken while blinking.
+- Other pins: define `SBL_IDENTIFY_LED_A` and `SBL_IDENTIFY_LED_B` before including
+  `sbl_port_mbed.h`, or pass them to the constructor.
+- Not hooked, the board refuses IDENTIFY with UNKNOWN_ID, and ShardBench says the board
+  cannot identify itself instead of waiting for a blink that will not come.
+- Another platform: `sbl_on_identify(ctx, fn, user)`, where `fn(seconds, user)` starts the
+  blinking and returns.
+
 ---
 
-## 12. Checklist
+## 13. Checklist
 
 - [ ] port: `write` sends everything; `lock`/`unlock` real if two contexts can send
 - [ ] `sbl_device_info` outlives the context
@@ -514,3 +538,4 @@ shardbench.can_received(frame_data, frame_len);
 - [ ] cross-checks against the host decoder for anything new on the wire
 - [ ] CAN tunnel: `attach_can` before `start`, `can_received` filtered on 0x7A0 and own id,
       `send` refuses until the node has its node id
+- [ ] IDENTIFY hooked (`sbl::Identify`), on the board's own LED pins

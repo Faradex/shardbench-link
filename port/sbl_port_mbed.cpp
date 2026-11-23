@@ -431,4 +431,76 @@ const sbl_stream_cfg *Link::stream_config(uint16_t id) const
     return sbl_stream_config(&_ctx, id);
 }
 
+// --- identify ---------------------------------------------------------------
+
+namespace {
+/** One swap of the two LEDs; four a second reads as urgent without being a flicker. */
+constexpr auto IDENTIFY_SWAP = std::chrono::milliseconds(250);
+constexpr uint32_t SWAPS_PER_SECOND = 4;
+}  // namespace
+
+Identify::Identify(PinName a, PinName b)
+    : _pins{a, b}, _saved{0, 0}, _left(0), _phase(0)
+{
+}
+
+void Identify::attach(Link &link)
+{
+    sbl_on_identify(link.ctx(), &Identify::on_identify, this);
+}
+
+void Identify::on_identify(uint16_t seconds, void *user)
+{
+    static_cast<Identify *>(user)->start(seconds);
+}
+
+void Identify::start(uint16_t seconds)
+{
+    core_util_critical_section_enter();
+    const bool running = _left != 0;
+    if (seconds == 0) {
+        if (running) {
+            _ticker.detach();
+            restore();
+        }
+        core_util_critical_section_exit();
+        return;
+    }
+    if (!running) {
+        /* Read before taking the pin over: gpio_init only names it, and the input
+           register of an output pin reads back the level it is driving. */
+        for (int i = 0; i < 2; i++) {
+            gpio_init(&_gpio[i], _pins[i]);
+            _saved[i] = gpio_read(&_gpio[i]);
+            gpio_dir(&_gpio[i], PIN_OUTPUT);
+        }
+        _phase = 0;
+        _ticker.attach(mbed::callback(this, &Identify::tick), IDENTIFY_SWAP);
+    }
+    _left = static_cast<uint32_t>(seconds) * SWAPS_PER_SECOND;
+    core_util_critical_section_exit();
+}
+
+void Identify::tick()
+{
+    if (_left == 0) {
+        return;
+    }
+    _phase ^= 1u;
+    gpio_write(&_gpio[0], _phase);
+    gpio_write(&_gpio[1], _phase ^ 1u);
+    if (--_left == 0) {
+        _ticker.detach();
+        restore();
+    }
+}
+
+void Identify::restore()
+{
+    _left = 0;
+    for (int i = 0; i < 2; i++) {
+        gpio_write(&_gpio[i], _saved[i]);
+    }
+}
+
 }  // namespace sbl

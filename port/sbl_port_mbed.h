@@ -179,4 +179,58 @@ private:
 
 }  // namespace sbl
 
+/*
+ * The LEDs IDENTIFY blinks. Every Shard V2 board seen so far wires its two status LEDs to
+ * the same socket pins -- yellow on PA_5, green on PC_11, each through a BSS123, so high
+ * is on (BMU-1ch, and the 48 V sense unit EPVIT039). A board that differs defines these
+ * before including this header.
+ */
+#ifndef SBL_IDENTIFY_LED_A
+#define SBL_IDENTIFY_LED_A PA_5
+#endif
+#ifndef SBL_IDENTIFY_LED_B
+#define SBL_IDENTIFY_LED_B PC_11
+#endif
+
+namespace sbl {
+
+/**
+ * IDENTIFY (0x0008): the two LEDs alternate four times a second, so an operator facing a
+ * rack of identical boards can tell which one ShardBench means.
+ *
+ * Nothing blocks: a Ticker swaps them from its interrupt, and the request is answered
+ * the moment it starts. When the time is up each LED goes back to the level it had
+ * before, whatever the firmware was using it for. A new IDENTIFY starts the time again;
+ * 0 seconds stops at once.
+ *
+ * The pins are taken only while blinking. On this firmware PA_5 is also the SDK's status
+ * LED; if the SDK writes it meanwhile, the blink stutters for a moment and carries on.
+ */
+class Identify {
+public:
+    explicit Identify(PinName a = SBL_IDENTIFY_LED_A, PinName b = SBL_IDENTIFY_LED_B);
+
+    /** Answer IDENTIFY on this link. Once, before or after link.start(). */
+    void attach(Link &link);
+
+    /** Blink for `seconds`; 0 stops. What the host's request ends up calling. */
+    void start(uint16_t seconds);
+
+    bool active() const { return _left != 0; }
+
+private:
+    static void on_identify(uint16_t seconds, void *user);
+    void tick();                           /* interrupt context */
+    void restore();                        /* inside a critical section */
+
+    PinName          _pins[2];
+    gpio_t           _gpio[2];
+    int              _saved[2];
+    volatile uint32_t _left;               /* swaps still to make */
+    uint8_t          _phase;
+    mbed::Ticker     _ticker;
+};
+
+}  // namespace sbl
+
 #endif /* SBL_PORT_MBED_H */

@@ -277,6 +277,32 @@ static int handle_core(sbl_ctx *ctx, const sbl_frame *f)
         return 1;
     }
 
+    case SBL_ID_IDENTIFY: {
+        uint16_t seconds = SBL_IDENTIFY_DEFAULT_S;
+
+        if (f->type != SBL_CALL) {
+            break;
+        }
+        if (ctx->identify == NULL) {
+            send_err(ctx, f->id, f->seq, SBL_ERR_UNKNOWN_ID);
+            return 1;
+        }
+        if (f->len == 1) {
+            send_err(ctx, f->id, f->seq, SBL_ERR_BAD_LEN);
+            return 1;
+        }
+        if (f->len >= 2) {
+            seconds = get_u16(&f->payload[0]);
+        }
+        if (seconds > SBL_IDENTIFY_MAX_S) {
+            seconds = SBL_IDENTIFY_MAX_S;      /* an hour of blinking is a mistake */
+        }
+        ctx->identify(seconds, ctx->identify_user);
+        put_u16(out, seconds);
+        send(ctx, SBL_RSP, f->id, f->seq, SBL_FLAG_NONE, out, 2);
+        return 1;
+    }
+
     default:
         return 0;
     }
@@ -397,8 +423,16 @@ void sbl_init(sbl_ctx *ctx, const sbl_port *port, const sbl_device_info *info)
     ctx->dropped = 0;
     ctx->received = 0;
     ctx->slowest_ms = 0;
+    ctx->identify = NULL;
+    ctx->identify_user = NULL;
     ctx->started_ms = port->tick_ms(port->io);
     sbl_decoder_init(&ctx->decoder, dispatch, ctx);
+}
+
+void sbl_on_identify(sbl_ctx *ctx, sbl_identify_fn fn, void *user)
+{
+    ctx->identify = fn;
+    ctx->identify_user = user;
 }
 
 int sbl_add(sbl_ctx *ctx, uint16_t id, uint8_t kinds, sbl_handler_fn fn, void *user)
